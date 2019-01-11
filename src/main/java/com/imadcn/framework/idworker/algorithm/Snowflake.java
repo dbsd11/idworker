@@ -1,5 +1,6 @@
 package com.imadcn.framework.idworker.algorithm;
 
+import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,10 +15,10 @@ import org.slf4j.LoggerFactory;
  * <p>
  * SnowFlake的优点是，整体上按照时间自增排序，并且整个分布式系统内不会产生ID碰撞(由数据中心ID和机器ID作区分)，并且效率较高，经测试，SnowFlake每秒能够产生26万ID左右。
  * <p>
- * 注意这里进行了小改动: 
+ * 注意这里进行了小改动:
  * <br><b> · </b>Snowflake是5位的datacenter加5位的机器id; 这里变成使用10位的机器id (b)
  * <br><b> · </b>对系统时间的依赖性非常强，需关闭ntp的时间同步功能。当检测到ntp时间调整后，将会拒绝分配id
- * 
+ *
  * @author yangchao
  * @since 1.0.0
  */
@@ -45,27 +46,38 @@ public class Snowflake {
 	 * 机器ID向左移12位
 	 */
 	private final long workerIdShift = this.sequenceBits;
-	/** 
+	/**
 	 * 时间戳向左移22位(5+5+12)
 	 */
 	private final long timestampLeftShift = this.sequenceBits + this.workerIdBits;
-	/** 
+	/**
 	 * 序列在id中占的位数
 	 */
 	private final long sequenceBits = 12L;
-	/** 
+	/**
 	 * 生成序列的掩码，这里为4095 (0b111111111111=0xfff=4095)，12位
 	 */
 	private final long sequenceMask = -1L ^ -1L << this.sequenceBits;
+
 	/**
 	 * 并发控制，毫秒内序列(0~4095)
 	 */
-	private long sequence = 0L;
-	/** 
-	 * 上次生成ID的时间戳 
+//	private long sequence = 0L;
+	/**
+	 * 上次生成ID的时间戳
 	 */
-	private long lastTimestamp = -1L;
-	
+//	private long lastTimestamp = -1L;
+
+	/**
+	 * 并发控制，毫秒内序列(0~4095)
+	 */
+	private final AtomicLong sequence = new AtomicLong(0);
+
+	/**
+	 * 上次生成ID的时间戳
+	 */
+	private final AtomicLong lastTimestamp = new AtomicLong(0);
+
 	private final int HUNDRED_K = 100_000;
 
 	/**
@@ -78,7 +90,7 @@ public class Snowflake {
 		}
 		this.workerId = workerId;
 	}
-	
+
 	/**
 	 * Snowflake Builder
 	 * @param workerId workerId
@@ -87,7 +99,7 @@ public class Snowflake {
 	public static Snowflake create(long workerId) {
 		return new Snowflake(workerId);
 	}
-	
+
 	/**
 	 * 批量获取ID
 	 * @param size 获取大小，最多10万个
@@ -109,46 +121,24 @@ public class Snowflake {
 	 * 获得ID
 	 * @return SnowflakeId
 	 */
-	public synchronized long nextId() {
+	public long nextId() {
 		long timestamp = timeGen();
 
-		// 如果上一个timestamp与新产生的相等，则sequence加一(0-4095循环);
-		if (this.lastTimestamp == timestamp) {
-			// 对新的timestamp，sequence从0开始
-			this.sequence = this.sequence + 1 & this.sequenceMask;
-			// 毫秒内序列溢出
-			if (this.sequence == 0) {
-				// 阻塞到下一个毫秒,获得新的时间戳
-				timestamp = this.tilNextMillis(this.lastTimestamp);
-			}
-		} else {
-			// 时间戳改变，毫秒内序列重置
-			this.sequence = 0;
+		// 当前时间戳未变, 则获取sequence的下一个, 否则设置新的时间戳, 并重置序列为0
+		boolean flag = lastTimestamp.compareAndSet(timestamp, timestamp);
+		if (!flag) {
+			resetSequence(timestamp);
 		}
 
-		// 如果当前时间小于上一次ID生成的时间戳，说明系统时钟回退过这个时候应当抛出异常
-		if (timestamp < this.lastTimestamp) {
-			String message = String.format("Clock moved backwards. Refusing to generate id for %d milliseconds.", (this.lastTimestamp - timestamp));
-			logger.error(message);
-			throw new RuntimeException(message);
+		long newSeq = sequence.getAndIncrement();
+		// 判断序列是否超出毫秒内上限
+		if (newSeq >= sequenceMask) {
+			incrementTimestamp(lastTimestamp.get());
+			return nextId();
 		}
 
-		this.lastTimestamp = timestamp;
 		// 移位并通过或运算拼到一起组成64位的ID
-		return timestamp - this.epoch << this.timestampLeftShift | this.workerId << this.workerIdShift | this.sequence;
-	}
-
-	/**
-	 * 等待下一个毫秒的到来, 保证返回的毫秒数在参数lastTimestamp之后
-	 * @param lastTimestamp 上次生成ID的时间戳 
-	 * @return
-	 */
-	private long tilNextMillis(long lastTimestamp) {
-		long timestamp = timeGen();
-		while (timestamp <= lastTimestamp) {
-			timestamp = timeGen();
-		}
-		return timestamp;
+		return timestamp - this.epoch << this.timestampLeftShift | this.workerId << this.workerIdShift | newSeq;
 	}
 
 	/**
@@ -156,6 +146,31 @@ public class Snowflake {
 	 */
 	private long timeGen() {
 		return System.currentTimeMillis();
+	}
+
+	/**
+	 * 时间戳设置到后续毫秒时间, 然后再重置序列
+	 */
+	private synchronized void incrementTimestamp(long timestamp) {
+		long timestampTemp = timeGen();
+		if (timestampTemp > timestamp) {
+			return;
+		}
+		while (timestampTemp <= timestamp) {
+			timestampTemp = timeGen();
+		}
+		resetSequence(timestampTemp);
+	}
+
+	/**
+	 * 重置序列
+	 */
+	private void resetSequence(long timestamp) {
+		while (!lastTimestamp.compareAndSet(timestamp, timestamp)) {
+			if (lastTimestamp.compareAndSet(lastTimestamp.get(), timestamp)) {
+				sequence.set(0);
+			}
+		}
 	}
 
 }
