@@ -1,6 +1,5 @@
 package com.imadcn.framework.idworker.register.zookeeper;
 
-import java.io.Serializable;
 import java.lang.management.ManagementFactory;
 import java.net.InetAddress;
 import java.util.Date;
@@ -14,9 +13,7 @@ import org.slf4j.LoggerFactory;
  * @author yangchao
  * @since 1.0.0
  */
-public class NodeInfo implements Serializable {
-
-	private static final long serialVersionUID = 1L;
+public class NodeInfo {
 
 	private final Logger logger = LoggerFactory.getLogger(getClass());
 

@@ -3,6 +3,8 @@ package com.imadcn.framework.idworker.algorithm;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.function.Supplier;
+
 /**
  * Snowflake的结构如下(每部分用-分开):
  * <br>0 - 0000000000 0000000000 0000000000 0000000000 0 - 00000 - 00000 - 000000000000
@@ -21,50 +23,22 @@ import org.slf4j.LoggerFactory;
  * @author yangchao
  * @since 1.0.0
  */
-public class Snowflake implements IdGene {
+public class ShortShortAIID implements IdGene {
 
-    private static final Logger logger = LoggerFactory.getLogger(Snowflake.class);
+//    private static final Logger logger = LoggerFactory.getLogger(ShortShortAIID.class);
 
     /**
      * 业务标识
      */
     private final int bizFlag;
     /**
-     * 机器ID
-     */
-    private final long workerId;
-    /**
-     * 时间起始标记点，作为基准，一般取系统的最近时间，默认2017-01-01
-     */
-    private final long epoch = 1514736000000L;
-    /**
-     * 机器id所占的位数（源设计为5位，这里取消dataCenterId，采用10位，既1024台）
-     */
-    private final long workerIdBits = 2L;
-    /**
-     * 机器ID最大值: 1023 (从0开始)
-     */
-    private final long maxWorkerId = -1L ^ -1L << this.workerIdBits;
-    /**
-     * 机器ID向左移12位
-     */
-    private final long workerIdShift = this.sequenceBits;
-    /**
-     * 时间戳向左移22位(5+5+12)
-     */
-    private final long timestampLeftShift = this.sequenceBits + this.workerIdBits;
-    /**
      * 序列在id中占的位数
      */
-    private final long sequenceBits = 12L;
+    private final long sequenceBits = 22L;
     /**
      * 生成序列的掩码，这里为4095 (0b111111111111=0xfff=4095)，12位
      */
     private final long sequenceMask = -1L ^ -1L << this.sequenceBits;
-    /**
-     * 并发控制，毫秒内序列(0~4095)
-     */
-    private long sequence = 0L;
     /**
      * 上次生成ID的时间戳
      */
@@ -72,42 +46,38 @@ public class Snowflake implements IdGene {
 
     private final int HUNDRED_K = 100_000;
 
-    /**
-     * @param workerId 机器Id
-     */
-    private Snowflake(long workerId, int bizFlag) {
-        if (workerId > this.maxWorkerId || workerId < 0) {
-            String message = String.format("worker Id can't be greater than %d or less than 0", this.maxWorkerId);
-            throw new IllegalArgumentException(message);
+    private Supplier<Long> globalSequenceProvider;
+
+    private ShortShortAIID(Supplier<Long> globalSequenceProvider, int bizFlag) {
+        if (globalSequenceProvider == null) {
+            throw new IllegalArgumentException("globalSequenceProvider can't be null");
         }
-        if (bizFlag < 0 || bizFlag > 99) {
-            String message = String.format("bizFlag Id can't be greater than %d or less than 0", 99);
+        if (bizFlag < 0 || bizFlag > 100) {
+            String message = String.format("bizFlag Id can't be greater than %d or less than 0", 100);
             throw new IllegalArgumentException(message);
         }
 
-        this.workerId = workerId;
         this.bizFlag = bizFlag;
+        this.globalSequenceProvider = globalSequenceProvider;
     }
 
     /**
      * Snowflake Builder
      *
-     * @param workerId workerId
      * @return Snowflake Instance
      */
-    public static Snowflake create(long workerId) {
-        return create(workerId, 0);
+    public static ShortShortAIID create(Supplier<Long> globalSequenceProvider) {
+        return create(globalSequenceProvider, 0);
     }
 
     /**
      * Snowflake Builder
      *
-     * @param workerId workerId
-     * @param bizFlag  bizFlag
+     * @param bizFlag bizFlag
      * @return Snowflake Instance
      */
-    public static Snowflake create(long workerId, int bizFlag) {
-        return new Snowflake(workerId, bizFlag);
+    public static ShortShortAIID create(Supplier<Long> globalSequenceProvider, int bizFlag) {
+        return new ShortShortAIID(globalSequenceProvider, bizFlag);
     }
 
     /**
@@ -134,32 +104,20 @@ public class Snowflake implements IdGene {
      * @return SnowflakeId
      */
     public synchronized long nextId() {
-        long timestamp = timeGen();
-
-        // 如果上一个timestamp与新产生的相等，则sequence加一(0-4095循环);
-        if (this.lastTimestamp == timestamp) {
-            // 对新的timestamp，sequence从0开始
-            this.sequence = this.sequence + 1 & this.sequenceMask;
-            // 毫秒内序列溢出
-            if (this.sequence == 0) {
-                // 阻塞到下一个毫秒,获得新的时间戳
-                timestamp = this.tilNextMillis(this.lastTimestamp);
-            }
-        } else {
-            // 时间戳改变，毫秒内序列重置
-            this.sequence = 0;
-        }
-
+        long timestamp = tilNextMillis(this.lastTimestamp);
         // 如果当前时间小于上一次ID生成的时间戳，说明系统时钟回退过这个时候应当抛出异常
         if (timestamp < this.lastTimestamp) {
             String message = String.format("Clock moved backwards. Refusing to generate id for %d milliseconds.", (this.lastTimestamp - timestamp));
-            logger.error(message);
+//            logger.error(message);
             throw new RuntimeException(message);
         }
 
         this.lastTimestamp = timestamp;
+
+        long sequence = globalSequenceProvider.get() & sequenceMask;
+
         // 移位并通过或运算拼到一起组成64位的ID
-        long id = timestamp - this.epoch << this.timestampLeftShift | this.workerId << this.workerIdShift | this.sequence;
+        long id = sequence;
         return id + bizFlag * Double.valueOf(Math.pow(10, getSize() - 1)).longValue();
     }
 
@@ -185,15 +143,26 @@ public class Snowflake implements IdGene {
     }
 
     public int getSize() {
-        return 17;
+        return 8;
     }
 
     public static void main(String[] args) {
-        long id = Snowflake.create(1L).nextId();
+        long id = ShortShortAIID.create(()->1L).nextId();
         System.out.println(Long.toBinaryString(id));
         System.out.println(Long.highestOneBit(id));
         System.out.println(Long.numberOfLeadingZeros(id));
         System.out.println(Long.numberOfTrailingZeros(id));
-        System.out.println(Snowflake.create(1L, 6).nextId());
+        ShortShortAIID shortShortSnowflake = ShortShortAIID.create(()->6L);
+        System.out.println(shortShortSnowflake.nextId());
+        System.out.println(shortShortSnowflake.nextId());
+        System.out.println(shortShortSnowflake.nextId());
+        ShortShortAIID shortShortSnowflake1 = ShortShortAIID.create(()->6L);
+        System.out.println(shortShortSnowflake1.nextId());
+        System.out.println(shortShortSnowflake1.nextId());
+        System.out.println(shortShortSnowflake1.nextId());
+        ShortShortAIID shortShortSnowflake2 = ShortShortAIID.create(()->1L, 60);
+        System.out.println(shortShortSnowflake2.nextId());
+        System.out.println(shortShortSnowflake2.nextId());
+        System.out.println(shortShortSnowflake2.nextId());
     }
 }

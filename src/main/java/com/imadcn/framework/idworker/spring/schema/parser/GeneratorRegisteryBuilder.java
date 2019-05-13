@@ -15,6 +15,7 @@
  */
 package com.imadcn.framework.idworker.spring.schema.parser;
 
+import com.imadcn.framework.idworker.generator.CompressAIIDGenerator;
 import org.springframework.beans.factory.support.AbstractBeanDefinition;
 import org.springframework.beans.factory.support.BeanDefinitionBuilder;
 import org.springframework.beans.factory.xml.ParserContext;
@@ -35,7 +36,7 @@ import com.imadcn.framework.idworker.spring.common.GeneratorBeanDefinitionTag;
 public abstract class GeneratorRegisteryBuilder extends BaseBeanDefinitionParser {
 
 	/**
-	 * snowflake策略：zookeeper配置(idworker:registry)
+	 * snowflake策略：zookeeper依赖配置
 	 * @param element element
 	 * @param parserContext parserContext
 	 * @return AbstractBeanDefinition
@@ -52,16 +53,15 @@ public abstract class GeneratorRegisteryBuilder extends BaseBeanDefinitionParser
 	} 
     
     /**
-     * snowflake策略：参数(idworker:generator / generator:snowflake)
+     * snowflake策略：app config 参数
      * @param element element
      * @param parserContext parserContext
      * @return AbstractBeanDefinition
      */
     public static AbstractBeanDefinition buildApplicationConfigurationBeanDefinition(final Element element, final ParserContext parserContext) {
-		BeanDefinitionBuilder configuration = BeanDefinitionBuilder.rootBeanDefinition(ApplicationConfiguration.class);
+        BeanDefinitionBuilder configuration = BeanDefinitionBuilder.rootBeanDefinition(ApplicationConfiguration.class);
         addPropertyValueIfNotEmpty(GeneratorBeanDefinitionTag.GROUOP, "group", element, configuration);
         addPropertyValueIfNotEmpty(GeneratorBeanDefinitionTag.STRATEGY, "strategy", element, configuration);
-        addPropertyValueIfNotEmpty(GeneratorBeanDefinitionTag.LOW_CONCURRENCY, "lowConcurrency", element, configuration);
         return configuration.getBeanDefinition();
     }
     
@@ -81,6 +81,8 @@ public abstract class GeneratorRegisteryBuilder extends BaseBeanDefinitionParser
     		return SnowflakeGenerator.class;
     	case COMPRESS_UUID:
     		return CompressUUIDGenerator.class;
+		case COMPRESS_AIID:
+			return CompressAIIDGenerator.class;
     	default:
     		return SnowflakeGenerator.class;
     	}

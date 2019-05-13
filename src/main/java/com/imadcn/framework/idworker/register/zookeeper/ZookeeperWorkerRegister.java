@@ -94,8 +94,6 @@ public class ZookeeperWorkerRegister implements WorkerRegister {
 				}
 			}
 			throw new RegException("max worker num reached. register failed");
-		} catch (RegException e) {
-			throw e;
 		} catch (Exception e) {
 			logger.error("", e);
 			throw new IllegalStateException(e.getMessage(), e);
@@ -137,5 +135,9 @@ public class ZookeeperWorkerRegister implements WorkerRegister {
 	private String jsonizeNodeInfo(NodeInfo nodeInfo) {
 		String dateFormat = "yyyy-MM-dd HH:mm:ss";
 		return JSON.toJSONStringWithDateFormat(nodeInfo, dateFormat, SerializerFeature.WriteDateUseDateFormat);
+	}
+
+	public NodePath getNodePath() {
+		return nodePath;
 	}
 }

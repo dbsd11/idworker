@@ -19,7 +19,6 @@ import com.imadcn.framework.idworker.algorithm.CompressUUID;
 
 /**
  * 64进制的UUID
- * 
  * @author imadcn
  * @since 1.2.0
  */

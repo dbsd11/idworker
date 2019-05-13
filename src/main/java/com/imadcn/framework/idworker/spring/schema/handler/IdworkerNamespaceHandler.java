@@ -6,7 +6,6 @@ import com.imadcn.framework.idworker.spring.schema.parser.RegistryBeanDefinition
 
 /**
  * IdworkerNamespaceHandler
- * 
  * @author yangchao
  * @since 1.0.0
  */

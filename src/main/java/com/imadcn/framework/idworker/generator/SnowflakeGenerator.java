@@ -1,33 +1,34 @@
 package com.imadcn.framework.idworker.generator;
 
-import java.io.IOException;
-
-import org.apache.curator.framework.state.ConnectionStateListener;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
+import com.imadcn.framework.idworker.algorithm.IdGene;
+import com.imadcn.framework.idworker.algorithm.ShortSnowflake;
 import com.imadcn.framework.idworker.algorithm.Snowflake;
 import com.imadcn.framework.idworker.exception.RegException;
 import com.imadcn.framework.idworker.register.GeneratorConnector;
 import com.imadcn.framework.idworker.register.zookeeper.ZookeeperConnectionStateListener;
 import com.imadcn.framework.idworker.register.zookeeper.ZookeeperWorkerRegister;
+import org.apache.curator.framework.state.ConnectionStateListener;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.util.StringUtils;
+
+import java.io.IOException;
 
 /**
  * Snowflake算法生成工具
- * 
  * @author yangchao
  * @since 1.0.0
  */
 public class SnowflakeGenerator implements IdGenerator, GeneratorConnector {
-
+	
 	static final String FIXED_STRING_FORMAT = "%019d";
-
+	
 	private Logger logger = LoggerFactory.getLogger(getClass());
 
 	/**
 	 * snowflake 算法
 	 */
-	private Snowflake snowflake;
+	private IdGene idGene;
 	/**
 	 * snowflake 注册
 	 */
@@ -38,21 +39,15 @@ public class SnowflakeGenerator implements IdGenerator, GeneratorConnector {
 	private volatile boolean initialized = false;
 
 	private volatile boolean working = false;
-
+	
 	private volatile boolean connecting = false;
-
+	
 	private ConnectionStateListener listener;
 	
-	/**
-	 * 低并发模式
-	 * @since 1.2.5
-	 */
-	private boolean lowConcurrency = false;
-
 	public SnowflakeGenerator(ZookeeperWorkerRegister register) {
 		this.register = register;
 	}
-
+	
 	@Override
 	public synchronized void init() {
 		if (!initialized) {
@@ -74,8 +69,15 @@ public class SnowflakeGenerator implements IdGenerator, GeneratorConnector {
 			working = false;
 			connecting = true;
 			long workerId = register.register();
+			int bizFlag = 0;
+			String groupName = register.getNodePath().getGroupName();
+			if(!StringUtils.isEmpty(groupName) && groupName.contains("_")){
+				bizFlag = Integer.valueOf(groupName.substring(groupName.lastIndexOf("_") + 1, groupName.length()));
+			}
+
 			if (workerId >= 0) {
-				snowflake = Snowflake.create(workerId, lowConcurrency);
+				boolean useShort = !StringUtils.isEmpty(groupName) && groupName.startsWith("short");
+				idGene = useShort ? ShortSnowflake.create(workerId, bizFlag) : Snowflake.create(workerId, bizFlag);
 				working = true;
 				connecting = false;
 			} else {
@@ -85,11 +87,11 @@ public class SnowflakeGenerator implements IdGenerator, GeneratorConnector {
 			logger.info("worker is connecting, skip this time of register.");
 		}
 	}
-
+	
 	@Override
 	public long[] nextId(int size) {
 		if (isWorking()) {
-			return snowflake.nextId(size);
+			return idGene.nextId(size);
 		}
 		throw new IllegalStateException("worker isn't working, reg center may shutdown");
 	}
@@ -97,26 +99,33 @@ public class SnowflakeGenerator implements IdGenerator, GeneratorConnector {
 	@Override
 	public long nextId() {
 		if (isWorking()) {
-			return snowflake.nextId();
+			return idGene.nextId();
 		}
 		throw new IllegalStateException("worker isn't working, reg center may shutdown");
 	}
-
+	
 	@Override
 	public String nextStringId() {
 		return String.valueOf(nextId());
 	}
-
+	
 	@Override
 	public String nextFixedStringId() {
-		return String.format(FIXED_STRING_FORMAT, nextId());
+		int bizFlag = 0;
+		String groupName = register.getNodePath().getGroupName();
+		if(!StringUtils.isEmpty(groupName) && groupName.contains("_")){
+			bizFlag = Integer.valueOf(groupName.substring(groupName.lastIndexOf("_") + 1, groupName.length()));
+		}
+
+		String idFormat = String.format("%%0%dd", idGene.getSize() + Math.min(bizFlag, 10) / 10);
+		return String.format(idFormat, nextId());
 	}
 
 	@Override
 	public void suspend() {
 		this.working = false;
 	}
-
+	
 	@Override
 	public synchronized void close() throws IOException {
 		// 关闭，先重置状态(避免ZK删除 workerId，其他机器抢注，会导致workerID 重新生成的BUG)
@@ -133,7 +142,7 @@ public class SnowflakeGenerator implements IdGenerator, GeneratorConnector {
 	public boolean isConnecting() {
 		return this.connecting;
 	}
-
+	
 	/**
 	 * 重置连接状态
 	 */
@@ -142,13 +151,5 @@ public class SnowflakeGenerator implements IdGenerator, GeneratorConnector {
 		working = false;
 		connecting = false;
 	}
-
-	/**
-	 * 低并发模式
-	 * @param lowConcurrency 低并发模式 ? true : false
-	 */
-	public void setLowConcurrency(boolean lowConcurrency) {
-		this.lowConcurrency = lowConcurrency;
-	}
-
+	
 }

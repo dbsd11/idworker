@@ -19,7 +19,8 @@
     				<xsd:attribute name="max-retries" type="xsd:string" default="3" />
     				<xsd:attribute name="session-timeout-milliseconds" type="xsd:string" default="60000" />
     				<xsd:attribute name="connection-timeout-milliseconds" type="xsd:string" default="15000" />
-    				<xsd:attribute name="digest" type="xsd:string" />
+    				<xsd:attribute name="digest" type="xsd:string" />
+
     			</xsd:extension>
     		</xsd:complexContent>
     	</xsd:complexType>
@@ -30,9 +31,9 @@
     		<xsd:complexContent>
     			<xsd:extension base="beans:identifiedType">
     				<xsd:attribute name="registry-center-ref" type="xsd:string" />
-    				<xsd:attribute name="group" type="xsd:string" default="default"/>
     				<xsd:attribute name="strategy" type="xsd:string" default="snowflake"/>
-    				<xsd:attribute name="low-concurrency" type="xsd:boolean" default="false"/>
+					<xsd:attribute name="id-supplier" type="xsd:string"/>
+    				<xsd:attribute name="group" type="xsd:string" default="default"/>
     			</xsd:extension>
     		</xsd:complexContent>
     	</xsd:complexType>
